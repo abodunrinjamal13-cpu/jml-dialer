@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Base body default */
+body {
+  @apply bg-slate-50 text-slate-900 transition-colors duration-200;
+}
+
+/* Force dark canvas across all page containers when dark mode is toggled */
+html.dark,
+html.dark body,
+html.dark main {
+  background-color: #030712 !important; /* Matches Settings dark background */
+  color: #f8fafc !important;
+}
+
+/* Switches white cards and containers to dark navy */
+html.dark .bg-white {
+  background-color: #0b1329 !important;
+  border-color: #1e293b !important;
+}
+
+/* Switches search bars and light pills to dark backgrounds */
+html.dark .bg-slate-100,
+html.dark .bg-slate-50,
+html.dark .bg-gray-100 {
+  background-color: #111827 !important;
+  color: #ffffff !important;
+}
+
+/* Fixes text contrast across all pages in dark mode */
+html.dark .text-slate-900,
+html.dark .text-slate-800,
+html.dark .text-slate-700 {
+  color: #ffffff !important;
+}
+
+html.dark .text-slate-500,
+html.dark .text-slate-400 {
+  color: #94a3b8 !important;
+}

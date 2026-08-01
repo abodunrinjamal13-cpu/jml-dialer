@@ -1,0 +1,19 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id          String   @id @default(uuid())
+  name        String
+  email       String   @unique
+  password    String
+  twiliosid   String?  @default("")
+  twiliotoken String?  @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
