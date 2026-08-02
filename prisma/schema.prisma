@@ -17,3 +17,21 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+model Message {
+  id        String   @id @default(cuid())
+  content   String
+  sender    String?
+  receiver  String?
+  createdAt DateTime @default(now())
+}
+
+model Call {
+  id         String   @id @default(cuid())
+  callSid    String   @unique
+  status     String
+  fromNumber String
+  toNumber   String
+  duration   Int      @default(0)
+  createdAt  DateTime @default(now())
+}
