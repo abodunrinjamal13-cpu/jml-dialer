@@ -404,7 +404,7 @@ function DialerPage() {
         </div>
       )}
 
-      <Header title="JML Dialer" subtitle="Ready to connect" />
+      <Header title="JML Connect" subtitle="Ready to connect" />
 
       <main className="w-full max-w-md flex-1 flex flex-col justify-between px-5 pt-1 pb-24 overflow-y-auto">
         <div className="flex flex-col gap-1.5">

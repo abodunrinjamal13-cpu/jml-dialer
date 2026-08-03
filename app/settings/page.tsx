@@ -199,7 +199,7 @@ export default function SettingsPage() {
                 <Info className="w-4 h-4" />
               </div>
               <div className="flex flex-col">
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">About JML Dialer</span>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">About JML Connect</span>
                 <span className="text-[11px] text-slate-400 dark:text-slate-500">Version 1.0.0 (MVP Build)</span>
               </div>
             </div>
@@ -228,7 +228,7 @@ export default function SettingsPage() {
               </div>
               <DialogHeader className="items-center gap-1.5">
                 <DialogTitle className="text-base font-bold text-slate-900 dark:text-white">
-                  Log out of JML Dialer?
+                  Log out of JML Connect?
                 </DialogTitle>
                 <DialogDescription className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-[220px]">
                   You'll need to sign in again to access your dialer, contacts, and call history.

@@ -45,7 +45,7 @@ export default function LoginPage() {
           {isLogin ? "Welcome Back" : "Create an Account"}
         </h2>
         <p className="text-xs text-zinc-400 text-center mb-6">
-          {isLogin ? "Sign in to access your dashboard" : "Sign up to start using JML Dialer"}
+          {isLogin ? "Sign in to access your dashboard" : "Sign up to start using JML Connect"}
         </p>
 
         {error && (

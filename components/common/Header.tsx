@@ -11,7 +11,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  title = "JML Dialer",
+  title = "JML Connect",
   subtitle = "Business Voice Platform",
   userName,
 }) => {

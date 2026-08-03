@@ -45,7 +45,7 @@ export default function RegisterPage() {
       <div className="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-3xl p-6 shadow-xl flex flex-col gap-5">
         <div className="flex flex-col items-center gap-1 text-center">
           <h1 className="text-xl font-bold text-white">Create an Account</h1>
-          <p className="text-xs text-slate-400">Sign up to start using JML Dialer</p>
+          <p className="text-xs text-slate-400">Sign up to start using JML Connect</p>
         </div>
 
         {error && (
