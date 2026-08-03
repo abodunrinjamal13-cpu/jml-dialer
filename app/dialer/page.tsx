@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
+import { useSearchParams } from "next/navigation";
 import { Device } from "@twilio/voice-sdk";
 import { Header } from "@/components/common/Header";
 import { BottomNavigation } from "@/components/common/BottomNavigation";
@@ -9,6 +10,7 @@ import { StatusCard } from "@/components/dialer/StatusCard";
 import { PhoneInput } from "@/components/dialer/PhoneInput";
 import { DialPad } from "@/components/dialer/DialPad";
 import { CallButton } from "@/components/dialer/CallButton";
+import { createClient } from "@/lib/supabase/client";
 import { 
   UserPlus, 
   UserCheck, 
@@ -25,6 +27,10 @@ import {
 } from "lucide-react";
 
 function DialerPage() {
+  const supabase = createClient();
+  const searchParams = useSearchParams();
+  const initialNumber = searchParams.get("number");
+
   const [hasMounted, setHasMounted] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [isInCall, setIsInCall] = useState(false);
@@ -43,10 +49,63 @@ function DialerPage() {
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [callNotes, setCallNotes] = useState("");
 
+  // Database-backed contact lookup state
+  const [contactInfo, setContactInfo] = useState<{ name: string; title?: string; location?: string } | null>(null);
+
   // Ensure component only renders after mounting on client to prevent hydration errors
   useEffect(() => {
     setHasMounted(true);
-  }, []);
+    if (initialNumber) {
+      setPhoneNumber(initialNumber);
+    }
+  }, [initialNumber]);
+
+  // Lookup contact from Supabase whenever phone number changes
+  useEffect(() => {
+    async function fetchContact() {
+      if (!phoneNumber || phoneNumber.length < 3) {
+        setContactInfo(null);
+        return;
+      }
+
+      try {
+        const { data: userData } = await supabase.auth.getUser();
+        const userId = userData.user?.id;
+        if (!userId) return;
+
+        // Clean number variations for flexible matching (exact, stripped spaces, or suffix matching)
+        const cleanedNumber = phoneNumber.replace(/\D/g, "");
+        const queryVariants = [
+          phoneNumber,
+          cleanedNumber,
+          `+${cleanedNumber}`,
+          cleanedNumber.startsWith("234") ? `0${cleanedNumber.slice(3)}` : null,
+          !cleanedNumber.startsWith("234") && cleanedNumber.startsWith("0") ? `234${cleanedNumber.slice(1)}` : null,
+        ].filter(Boolean);
+
+        // Build an OR query string for Supabase e.g. phone.eq.08148...,phone.eq.8148...
+        const orFilter = queryVariants.map((v) => `phone.eq.${v}`).join(",");
+
+        const { data, error } = await supabase
+          .from("contacts")
+          .select("name, title, location")
+          .eq("user_id", userId)
+          .or(orFilter)
+          .maybeSingle();
+
+        if (data) {
+          setContactInfo(data);
+        } else {
+          setContactInfo(null);
+        }
+      } catch (err) {
+        console.error("Error fetching contact:", err);
+        setContactInfo(null);
+      }
+    }
+
+    fetchContact();
+  }, [phoneNumber, supabase]);
 
   useEffect(() => {
     if (!hasMounted) return;
@@ -93,6 +152,32 @@ function DialerPage() {
     }
   };
 
+  const logCallToSupabase = async (durationSecs: number, statusVal: string) => {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+      if (!userId || !phoneNumber) return;
+
+      const { data: contactData } = await supabase
+        .from("contacts")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("phone", phoneNumber)
+        .maybeSingle();
+
+      await supabase.from("call_history").insert({
+        user_id: userId,
+        contact_id: contactData ? contactData.id : null,
+        direction: "outgoing",
+        status: statusVal,
+        duration: durationSecs,
+        started_at: new Date(Date.now() - durationSecs * 1000).toISOString(),
+      });
+    } catch (err) {
+      console.error("Error logging call history:", err);
+    }
+  };
+
   const handleCallToggle = async () => {
     if (!isInCall) {
       if (!device || !phoneNumber) return;
@@ -106,6 +191,7 @@ function DialerPage() {
         setCallState("Connected");
 
         call.on('disconnect', () => {
+          const finalDuration = callDuration;
           setActiveCall(null);
           setIsInCall(false);
           setIsMinimized(false);
@@ -115,15 +201,19 @@ function DialerPage() {
           setIsRecording(false);
           setShowInCallKeypad(false);
           setShowNotesModal(false);
+
+          logCallToSupabase(finalDuration, "completed");
         });
       } catch (error) {
         console.error("Call failed:", error);
         setIsInCall(false);
         setIsMinimized(false);
         setCallState("Ready");
+        logCallToSupabase(0, "missed");
       }
     } else {
       setCallState("End Call");
+      const finalDuration = callDuration;
       if (activeCall) {
         activeCall.disconnect();
       }
@@ -137,6 +227,8 @@ function DialerPage() {
         setIsRecording(false);
         setShowInCallKeypad(false);
         setShowNotesModal(false);
+
+        logCallToSupabase(finalDuration, "completed");
       }, 800);
     }
   };
@@ -161,17 +253,11 @@ function DialerPage() {
   const toggleSpeaker = () => setIsSpeakerOn(!isSpeakerOn);
   const toggleRecord = () => setIsRecording(!isRecording);
 
-  const knownContact =
-    phoneNumber.includes("987654321") || phoneNumber.includes("998765432")
-      ? { name: "John Smith", title: "Restaurant Owner", location: "São Paulo" }
-      : undefined;
-
   return (
     <div className="suppressHydrationWarning relative h-screen w-screen bg-slate-50 dark:bg-[#030712] text-slate-900 dark:text-white flex flex-col justify-between items-center select-none transition-colors duration-200 overflow-hidden">
       
       {isInCall && !isMinimized && (
         <div className="absolute inset-0 w-full h-full bg-[#0F1C3F] text-white p-6 flex flex-col justify-between z-[9999]">
-          
           <div className="flex justify-between items-center pt-2">
             <button 
               onClick={handleMinimizeCallScreen}
@@ -184,7 +270,7 @@ function DialerPage() {
           </div>
 
           <div className="text-center space-y-1">
-            <h2 className="text-2xl font-semibold">{knownContact ? knownContact.name : "Unknown Contact"}</h2>
+            <h2 className="text-2xl font-semibold">{contactInfo ? contactInfo.name : "Unknown Contact"}</h2>
             <p className="text-white/70 text-sm">{phoneNumber}</p>
             <p className="text-xs text-white/50">{callState === "Connected" ? `Active: ${Math.floor(callDuration / 60)}:${String(callDuration % 60).padStart(2, '0')}` : "Calling..."}</p>
           </div>
@@ -193,7 +279,7 @@ function DialerPage() {
             <div className="w-24 h-24 rounded-full bg-indigo-500/30 flex items-center justify-center relative shadow-inner">
               <div className="absolute inset-0 rounded-full border border-indigo-400/20 animate-ping"></div>
               <div className="w-16 h-16 rounded-full bg-indigo-600 flex items-center justify-center text-2xl">
-                👤
+                {contactInfo ? contactInfo.name[0].toUpperCase() : "👤"}
               </div>
             </div>
             <div className="text-emerald-400 font-mono text-lg font-medium">
@@ -305,7 +391,7 @@ function DialerPage() {
                 <PhoneCall className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-xs font-semibold leading-tight">Ongoing Call ({knownContact ? knownContact.name : phoneNumber})</h4>
+                <h4 className="text-xs font-semibold leading-tight">Ongoing Call ({contactInfo ? contactInfo.name : phoneNumber})</h4>
                 <p className="text-[10px] text-emerald-400 font-mono mt-0.5">
                   Tap to return • {Math.floor(callDuration / 60)}:{String(callDuration % 60).padStart(2, '0')}
                 </p>
@@ -328,19 +414,19 @@ function DialerPage() {
           <div className="w-full bg-slate-100/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-3 flex items-center justify-between transition-colors duration-200">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 font-bold text-xs shrink-0">
-                {knownContact ? knownContact.name[0].toUpperCase() : "?"}
+                {contactInfo ? contactInfo.name[0].toUpperCase() : "?"}
               </div>
               <div className="flex flex-col">
                 <h3 className="text-xs font-semibold text-slate-900 dark:text-white leading-tight">
-                  {knownContact ? knownContact.name : "Unknown Contact"}
+                  {contactInfo ? contactInfo.name : "Unknown Contact"}
                 </h3>
                 <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  {knownContact ? `${knownContact.title} • ${knownContact.location}` : "Tap to save contact"}
+                  {contactInfo ? `${contactInfo.title || ""} ${contactInfo.location ? `• ${contactInfo.location}` : ""}`.trim() : "Tap to save contact"}
                 </p>
               </div>
             </div>
 
-            {knownContact ? (
+            {contactInfo ? (
               <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400">
                 <UserCheck className="w-4 h-4" />
               </div>

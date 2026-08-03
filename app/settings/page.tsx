@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Key,
   Volume2,
@@ -12,13 +12,36 @@ import {
   Check
 } from "lucide-react";
 import { useTheme } from "../ThemeContext";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 export default function SettingsPage() {
+  const supabase = createClient();
+  const router = useRouter();
   const { isDarkMode, toggleTheme } = useTheme();
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
 
-  const userName = "Jamal";
-  const userEmail = "jamal@jmldialer.com";
+  const [userName, setUserName] = useState("Guest");
+  const [userEmail, setUserEmail] = useState("");
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUserName(data.user?.user_metadata?.full_name ?? "Guest");
+      setUserEmail(data.user?.email ?? "");
+    });
+  }, [supabase]);
+
   const userInitial = userName.charAt(0).toUpperCase();
 
   const [twilioAccountSid, setTwilioAccountSid] = useState("ACxxxxxxxxxxxxxxxxxxxxxxxx");
@@ -31,11 +54,10 @@ export default function SettingsPage() {
     setTimeout(() => setShowTwilioSaved(false), 2000);
   };
 
-  const handleLogout = () => {
-    const confirmed = window.confirm("Are you sure you want to logout?");
-    if (confirmed) {
-      window.location.href = "/login";
-    }
+  const confirmLogout = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
   };
 
   return (
@@ -187,12 +209,53 @@ export default function SettingsPage() {
 
         {/* Logout Button */}
         <button
-          onClick={handleLogout}
+          onClick={() => setLogoutDialogOpen(true)}
           className="w-full bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 dark:hover:bg-rose-950/50 text-rose-600 dark:text-rose-400 text-xs font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 border border-rose-100 dark:border-rose-900/40 transition-all active:scale-[0.99]"
         >
           <LogOut className="w-4 h-4" />
           <span>Log Out</span>
         </button>
+
+        {/* Logout Confirmation Dialog */}
+        <Dialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
+          <DialogContent
+            className="sm:max-w-xs rounded-3xl border-slate-200/80 dark:border-slate-800 dark:bg-slate-900 p-0 gap-0 overflow-hidden"
+            showCloseButton={false}
+          >
+            <div className="flex flex-col items-center text-center px-6 pt-8 pb-6">
+              <div className="w-14 h-14 rounded-full bg-rose-50 dark:bg-rose-950/40 flex items-center justify-center mb-4">
+                <LogOut className="w-6 h-6 text-rose-600 dark:text-rose-400" />
+              </div>
+              <DialogHeader className="items-center gap-1.5">
+                <DialogTitle className="text-base font-bold text-slate-900 dark:text-white">
+                  Log out of JML Dialer?
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-[220px]">
+                  You'll need to sign in again to access your dialer, contacts, and call history.
+                </DialogDescription>
+              </DialogHeader>
+            </div>
+
+            <DialogFooter className="!mx-0 !mb-0 !rounded-none !border-t-0 bg-transparent p-4 pt-0 flex flex-col gap-2 sm:flex-col">
+              <Button
+                onClick={confirmLogout}
+                className="w-full rounded-2xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold py-2.5 h-auto"
+              >
+                Log Out
+              </Button>
+              <DialogClose
+                render={
+                  <Button
+                    variant="ghost"
+                    className="w-full rounded-2xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 py-2.5 h-auto"
+                  />
+                }
+              >
+                Cancel
+              </DialogClose>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

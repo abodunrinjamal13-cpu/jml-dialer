@@ -1,5 +1,8 @@
-import React from "react";
+"use client";
+
+import React, { useEffect, useState } from "react";
 import { PhoneCall, ShieldCheck } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 interface HeaderProps {
   title?: string;
@@ -10,9 +13,25 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   title = "JML Dialer",
   subtitle = "Business Voice Platform",
-  userName = "Jamal",
+  userName,
 }) => {
-  const userInitial = userName ? userName.charAt(0).toUpperCase() : "J";
+  const supabase = createClient();
+  const [sessionName, setSessionName] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setSessionName(data.user?.user_metadata?.full_name ?? null);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSessionName(session?.user?.user_metadata?.full_name ?? null);
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, [supabase]);
+
+  const displayName = userName ?? sessionName ?? "Guest";
+  const userInitial = displayName.charAt(0).toUpperCase();
 
   return (
     <header className="w-full bg-white/90 dark:bg-gradient-to-r dark:from-indigo-600 dark:to-blue-600 backdrop-blur-md border-b border-slate-200/80 dark:border-indigo-400/30 px-4 py-2.5 shadow-xs shrink-0 transition-all duration-200">

@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import { Search, Plus, Phone, Star, MessageSquare, X, Edit2, Trash2, Clock, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 interface Contact {
   id: string;
@@ -14,47 +16,88 @@ interface Contact {
 interface CallHistoryItem {
   id: string;
   contactId: string;
-  type: "incoming" | "outgoing" | "missed";
+  type: string;
   timestamp: string;
 }
 
-const mockRecentCalls: CallHistoryItem[] = [
-  { id: "c1", contactId: "1", type: "outgoing", timestamp: "Today, 10:15 AM" },
-  { id: "c2", contactId: "1", type: "incoming", timestamp: "Yesterday, 4:30 PM" },
-  { id: "c3", contactId: "2", type: "missed", timestamp: "Yesterday, 1:00 PM" },
-  { id: "c4", contactId: "3", type: "outgoing", timestamp: "Jul 28, 6:45 PM" },
-];
-
 export default function ContactsPage() {
+  const supabase = createClient();
+  const router = useRouter();
+
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [recentCalls, setRecentCalls] = useState<CallHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [isEditing, setIsEditing] = useState(false);
 
-  // Form states
   const [nameInput, setNameInput] = useState("");
   const [numberInput, setNumberInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // Fetch contacts from database on mount
   useEffect(() => {
     fetchContacts();
   }, []);
 
   const fetchContacts = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch("/api/contacts");
-      if (res.ok) {
-        const data = await res.json();
-        setContacts(data);
-      }
-    } catch (error) {
-      console.error("Failed to fetch contacts", error);
-    } finally {
+    setLoading(true);
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id;
+    if (!userId) {
       setLoading(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id, name, phone, email, favorite")
+      .eq("user_id", userId)
+      .order("name", { ascending: true });
+
+    if (!error && data) {
+      setContacts(
+        data.map((c) => ({
+          id: c.id,
+          name: c.name,
+          phone: c.phone ?? "",
+          email: c.email ?? undefined,
+          isFavorite: c.favorite ?? false,
+        }))
+      );
+    }
+    setLoading(false);
+  };
+
+  const fetchRecentCalls = async (contactId: string) => {
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id;
+    if (!userId) return;
+
+    const { data, error } = await supabase
+      .from("call_history")
+      .select("id, contact_id, direction, status, started_at")
+      .eq("user_id", userId)
+      .eq("contact_id", contactId)
+      .order("started_at", { ascending: false })
+      .limit(10);
+
+    if (!error && data) {
+      setRecentCalls(
+        data.map((c) => ({
+          id: c.id,
+          contactId: c.contact_id,
+          type: c.status === "missed" ? "missed" : c.direction ?? "outgoing",
+          timestamp: c.started_at
+            ? new Date(c.started_at).toLocaleString([], {
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })
+            : "",
+        }))
+      );
     }
   };
 
@@ -62,51 +105,76 @@ export default function ContactsPage() {
     e.preventDefault();
     if (!nameInput.trim() || !numberInput.trim()) return;
 
-    try {
-      setSubmitting(true);
-      const res = await fetch("/api/contacts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: nameInput, phone: numberInput }),
-      });
-
-      if (res.ok) {
-        const newContact = await res.json();
-        setContacts((prev) => [...prev, newContact]);
-        setNameInput("");
-        setNumberInput("");
-        setShowAddModal(false);
-      } else {
-        alert("Failed to create contact");
-      }
-    } catch (error) {
-      console.error("Error adding contact", error);
-    } finally {
+    setSubmitting(true);
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id;
+    if (!userId) {
       setSubmitting(false);
+      return;
     }
+
+    const { data, error } = await supabase
+      .from("contacts")
+      .insert({
+        user_id: userId,
+        name: nameInput,
+        phone: numberInput,
+      })
+      .select()
+      .single();
+
+    if (!error && data) {
+      setContacts((prev) => [
+        ...prev,
+        { id: data.id, name: data.name, phone: data.phone ?? "", isFavorite: data.favorite ?? false },
+      ]);
+      setNameInput("");
+      setNumberInput("");
+      setShowAddModal(false);
+    } else {
+      alert("Failed to create contact");
+    }
+    setSubmitting(false);
   };
 
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedContact || !nameInput.trim() || !numberInput.trim()) return;
 
-    // Optional: Add backend PUT route later, updating UI state seamlessly for now
-    const updated = { ...selectedContact, name: nameInput, phone: numberInput };
-    setContacts((prev) => prev.map((c) => (c.id === selectedContact.id ? updated : c)));
-    setSelectedContact(updated);
-    setIsEditing(false);
+    const { error } = await supabase
+      .from("contacts")
+      .update({ name: nameInput, phone: numberInput })
+      .eq("id", selectedContact.id);
+
+    if (!error) {
+      const updated = { ...selectedContact, name: nameInput, phone: numberInput };
+      setContacts((prev) => prev.map((c) => (c.id === selectedContact.id ? updated : c)));
+      setSelectedContact(updated);
+      setIsEditing(false);
+    } else {
+      alert("Failed to update contact");
+    }
   };
 
-  const handleDeleteContact = (id: string) => {
-    // Optional: Add backend DELETE route later, updating UI state seamlessly for now
-    setContacts((prev) => prev.filter((c) => c.id !== id));
-    setSelectedContact(null);
+  const handleDeleteContact = async (id: string) => {
+    const { error } = await supabase.from("contacts").delete().eq("id", id);
+    if (!error) {
+      setContacts((prev) => prev.filter((c) => c.id !== id));
+      setSelectedContact(null);
+    } else {
+      alert("Failed to delete contact");
+    }
   };
 
   const startEdit = (contact: Contact) => {
     setNameInput(contact.name);
     setNumberInput(contact.phone);
     setIsEditing(true);
+  };
+
+  const openContact = (contact: Contact) => {
+    setSelectedContact(contact);
+    fetchRecentCalls(contact.id);
   };
 
   const filteredContacts = contacts.filter(
@@ -170,7 +238,12 @@ export default function ContactsPage() {
                 </div>
                 <div className="flex flex-col gap-2">
                   {favorites.map((contact) => (
-                    <ContactCard key={contact.id} contact={contact} onPreview={() => setSelectedContact(contact)} />
+                    <ContactCard 
+                      key={contact.id} 
+                      contact={contact} 
+                      onPreview={() => openContact(contact)} 
+                      onCall={() => router.push(`/dialer?number=${encodeURIComponent(contact.phone)}`)}
+                    />
                   ))}
                 </div>
               </div>
@@ -184,7 +257,12 @@ export default function ContactsPage() {
                   <span className="px-1 text-xs font-bold text-slate-400">{letter}</span>
                   <div className="flex flex-col gap-2">
                     {items.map((contact) => (
-                      <ContactCard key={contact.id} contact={contact} onPreview={() => setSelectedContact(contact)} />
+                      <ContactCard 
+                        key={contact.id} 
+                        contact={contact} 
+                        onPreview={() => openContact(contact)} 
+                        onCall={() => router.push(`/dialer?number=${encodeURIComponent(contact.phone)}`)}
+                      />
                     ))}
                   </div>
                 </div>
@@ -220,7 +298,7 @@ export default function ContactsPage() {
 
                 <div className="flex items-center justify-around w-full py-2 border-y border-slate-100">
                   <button
-                    onClick={() => alert(`Calling ${selectedContact.phone}...`)}
+                    onClick={() => router.push(`/dialer?number=${encodeURIComponent(selectedContact.phone)}`)}
                     className="flex flex-col items-center gap-1 text-[11px] font-semibold text-blue-600"
                   >
                     <div className="p-3 rounded-2xl bg-blue-50 hover:bg-blue-100">
@@ -230,7 +308,7 @@ export default function ContactsPage() {
                   </button>
 
                   <button
-                    onClick={() => alert(`Opening messages for ${selectedContact.phone}...`)}
+                    onClick={() => router.push(`/messages/${selectedContact.id}`)}
                     className="flex flex-col items-center gap-1 text-[11px] font-semibold text-slate-600"
                   >
                     <div className="p-3 rounded-2xl bg-slate-100 hover:bg-slate-200">
@@ -266,17 +344,15 @@ export default function ContactsPage() {
                     <span>Recent Calls</span>
                   </div>
                   <div className="flex flex-col gap-1.5 max-h-32 overflow-y-auto">
-                    {mockRecentCalls.filter((c) => c.contactId === selectedContact.id).length === 0 ? (
+                    {recentCalls.length === 0 ? (
                       <p className="text-xs text-slate-400 italic">No recent call history</p>
                     ) : (
-                      mockRecentCalls
-                        .filter((c) => c.contactId === selectedContact.id)
-                        .map((call) => (
-                          <div key={call.id} className="flex justify-between items-center text-xs p-2 bg-slate-50 rounded-xl">
-                            <span className="capitalize font-medium text-slate-700">{call.type} call</span>
-                            <span className="text-[11px] text-slate-400">{call.timestamp}</span>
-                          </div>
-                        ))
+                      recentCalls.map((call) => (
+                        <div key={call.id} className="flex justify-between items-center text-xs p-2 bg-slate-50 rounded-xl">
+                          <span className="capitalize font-medium text-slate-700">{call.type} call</span>
+                          <span className="text-[11px] text-slate-400">{call.timestamp}</span>
+                        </div>
+                      ))
                     )}
                   </div>
                 </div>
@@ -378,7 +454,15 @@ export default function ContactsPage() {
   );
 }
 
-function ContactCard({ contact, onPreview }: { contact: Contact; onPreview: () => void }) {
+function ContactCard({ 
+  contact, 
+  onPreview, 
+  onCall 
+}: { 
+  contact: Contact; 
+  onPreview: () => void; 
+  onCall: (e: React.MouseEvent) => void; 
+}) {
   return (
     <div
       onClick={onPreview}
@@ -393,9 +477,16 @@ function ContactCard({ contact, onPreview }: { contact: Contact; onPreview: () =
           <span className="text-[11px] text-slate-400 font-medium">{contact.phone}</span>
         </div>
       </div>
-      <div className="p-2 rounded-full bg-blue-50 text-blue-600">
+      <button 
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onCall(e);
+        }}
+        className="p-2 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+      >
         <Phone className="w-4 h-4" />
-      </div>
+      </button>
     </div>
   );
 }
