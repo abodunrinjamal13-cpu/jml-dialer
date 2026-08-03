@@ -12,13 +12,14 @@ export default function RootLayout({
 }) {
   const pathname = usePathname();
   const isLoginPage = pathname === "/login";
+  const isChatDetailPage = pathname?.startsWith("/messages/") && pathname.split("/").length > 2;
 
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased" suppressHydrationWarning>
         <ThemeProvider>
           {children}
-          {!isLoginPage && <BottomNavigation />}
+          {!isLoginPage && !isChatDetailPage && <BottomNavigation />}
         </ThemeProvider>
       </body>
     </html>
