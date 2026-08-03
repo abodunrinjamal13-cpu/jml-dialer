@@ -32,7 +32,10 @@ export default function SettingsPage() {
   };
 
   const handleLogout = () => {
-    window.location.href = "/login";
+    const confirmed = window.confirm("Are you sure you want to logout?");
+    if (confirmed) {
+      window.location.href = "/login";
+    }
   };
 
   return (
