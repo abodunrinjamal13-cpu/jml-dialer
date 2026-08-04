@@ -1,6 +1,7 @@
-import { supabase } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
 
 export async function getContacts(userId: string) {
+  const supabase = createClient()
   const { data, error } = await supabase
     .from('contacts')
     .select('*')
@@ -19,6 +20,7 @@ export async function createContact(contactData: {
   notes?: string
   user_id: string
 }) {
+  const supabase = createClient()
   const { data, error } = await supabase
     .from('contacts')
     .insert([contactData])
@@ -37,6 +39,7 @@ export async function updateContact(id: string, updates: Partial<{
   favorite: boolean
   notes: string
 }>) {
+  const supabase = createClient()
   const { data, error } = await supabase
     .from('contacts')
     .update(updates)
@@ -49,6 +52,7 @@ export async function updateContact(id: string, updates: Partial<{
 }
 
 export async function deleteContact(id: string) {
+  const supabase = createClient()
   const { error } = await supabase
     .from('contacts')
     .delete()

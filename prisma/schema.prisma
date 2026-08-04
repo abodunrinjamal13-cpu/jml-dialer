@@ -67,7 +67,7 @@ model CallHistory {
   duration     Int?      @default(0)
   started_at   DateTime? @db.Timestamptz(6)
   ended_at     DateTime? @db.Timestamptz(6)
-  twilio_sid   String?
+  twilio_sid   String?   @unique
 
   user    User     @relation(fields: [user_id], references: [id])
   contact Contact? @relation(fields: [contact_id], references: [id])

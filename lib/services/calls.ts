@@ -1,6 +1,7 @@
-import { supabase } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
 
 export async function getCallHistory(userId: string) {
+  const supabase = createClient()
   const { data, error } = await supabase
     .from('call_history')
     .select('*, contacts(name, company)')
@@ -19,6 +20,7 @@ export async function createCallRecord(callData: {
   status: string
   twilio_sid?: string
 }) {
+  const supabase = createClient()
   const { data, error } = await supabase
     .from('call_history')
     .insert([{ ...callData, started_at: new Date().toISOString() }])
@@ -30,6 +32,7 @@ export async function createCallRecord(callData: {
 }
 
 export async function updateCallDuration(id: string, duration: number, status: string) {
+  const supabase = createClient()
   const { data, error } = await supabase
     .from('call_history')
     .update({ 
@@ -46,6 +49,7 @@ export async function updateCallDuration(id: string, duration: number, status: s
 }
 
 export async function deleteCallRecord(id: string) {
+  const supabase = createClient()
   const { error } = await supabase
     .from('call_history')
     .delete()

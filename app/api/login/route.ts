@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     // Find the user in SQLite
     const user = await prisma.user.findUnique({
       where: { email },
-    });
+    }) as any;
 
     if (!user || user.password !== password) {
       return NextResponse.json(

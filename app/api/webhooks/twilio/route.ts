@@ -6,27 +6,18 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const callSid = formData.get('CallSid')?.toString();
     const callStatus = formData.get('CallStatus')?.toString();
-    const from = formData.get('From')?.toString();
-    const to = formData.get('To')?.toString();
     const duration = formData.get('CallDuration')?.toString();
 
     if (!callSid) {
       return NextResponse.json({ error: 'Missing CallSid' }, { status: 400 });
     }
 
-    // Upsert call history into database
-    await prisma.call.upsert({
-      where: { callSid },
-      update: {
+    await prisma.callHistory.updateMany({
+      where: { twilio_sid: callSid },
+      data: {
         status: callStatus,
-        duration: duration ? parseInt(duration) : 0,
-      },
-      create: {
-        callSid,
-        status: callStatus || 'initiated',
-        fromNumber: from || '',
-        toNumber: to || '',
-        duration: duration ? parseInt(duration) : 0,
+        duration: duration ? parseInt(duration) : undefined,
+        ended_at: callStatus === 'completed' ? new Date() : undefined,
       },
     });
 
