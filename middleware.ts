@@ -25,11 +25,27 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  await supabase.auth.getUser();
+  // This refreshes the session if expired
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const url = request.nextUrl.clone();
+  const isAuthPage = url.pathname.startsWith("/login") || url.pathname.startsWith("/signup");
+
+  // If there is no user and they are trying to access protected pages, redirect to login
+  if (!user && !isAuthPage) {
+    url.pathname = "/login"; // Change this to your login or signup route
+    return NextResponse.redirect(url);
+  }
+
+  // If they are logged in and trying to go to login/signup, redirect them to your main app page
+  if (user && isAuthPage) {
+    url.pathname = "/"; // Change this to your main dashboard/dialer route
+    return NextResponse.redirect(url);
+  }
 
   return response;
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|auth).*)"],
 };
