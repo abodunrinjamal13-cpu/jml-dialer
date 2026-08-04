@@ -23,6 +23,8 @@ export default function ChatDetailPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [contactName, setContactName] = useState("Loading...");
+  const [contactPhone, setContactPhone] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -43,6 +45,7 @@ export default function ChatDetailPage() {
 
         if (contactData) {
           setContactName(contactData.name);
+          setContactPhone(contactData.phone ?? null);
         } else {
           setContactName("Chat Conversation");
         }
@@ -102,32 +105,46 @@ export default function ChatDetailPage() {
     e.preventDefault();
     if (!newMessage.trim() || !currentUserId || !contactId) return;
 
+    setIsSending(true);
     const text = newMessage;
     setNewMessage("");
 
-    // Optimistically update UI
-    const tempMessage: Message = {
-      id: Date.now().toString(),
-      user_id: currentUserId,
-      contact_id: contactId,
-      message: text,
-      direction: "outgoing",
-      created_at: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, tempMessage]);
+    // Resolve phone number dynamically if not already set
+    let resolvedPhoneNumber = contactPhone;
+    if (contactId && !resolvedPhoneNumber) {
+      const { data: contact } = await supabase
+        .from("contacts")
+        .select("phone")
+        .eq("id", contactId)
+        .single();
+      resolvedPhoneNumber = contact?.phone ?? null;
+      setContactPhone(resolvedPhoneNumber);
+    }
 
-    const { error } = await supabase.from("messages").insert({
-      user_id: currentUserId,
-      contact_id: contactId,
-      message: text,
-      direction: "outgoing",
-      status: "sent",
-    });
+    // Insert message including phone_number to satisfy database constraints
+    const { data, error } = await supabase
+      .from("messages")
+      .insert({
+        user_id: currentUserId,
+        contact_id: contactId,
+        phone_number: resolvedPhoneNumber,
+        message: text,
+        direction: "outgoing",
+        status: "sent",
+      })
+      .select()
+      .single();
 
     if (error) {
       console.error("Error inserting message:", error.message);
       alert("Failed to send: " + error.message);
+      // Revert the text input if failed
+      setNewMessage(text);
+    } else if (data) {
+      setMessages((prev) => [...prev, data]);
     }
+
+    setIsSending(false);
   };
 
   return (
@@ -204,7 +221,7 @@ export default function ChatDetailPage() {
           />
           <button
             type="submit"
-            disabled={!newMessage.trim()}
+            disabled={!newMessage.trim() || isSending}
             className="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white flex items-center justify-center transition shadow-md shrink-0"
           >
             <Send className="w-4 h-4" />

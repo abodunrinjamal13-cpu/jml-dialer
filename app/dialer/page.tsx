@@ -140,7 +140,40 @@ function DialerPage() {
     return null;
   }
 
+  // Helper to play standard telephone DTMF keypad frequencies using Web Audio API
+  const playDtmfTone = (digit: string) => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      const frequencies: { [key: string]: [number, number] } = {
+        "1": [697, 1209], "2": [697, 1336], "3": [697, 1477],
+        "4": [770, 1209], "5": [770, 1336], "6": [770, 1477],
+        "7": [852, 1209], "8": [852, 1336], "9": [852, 1477],
+        "*": [941, 1209], "0": [941, 1336], "#": [941, 1477],
+      };
+
+      const freqPair = frequencies[digit] || [440, 350];
+
+      osc.frequency.setValueAtTime(freqPair[0], audioCtx.currentTime);
+      osc.type = "sine";
+
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.15);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    } catch (e) {
+      // AudioContext blocked if no user interaction yet
+    }
+  };
+
   const handleKeyPress = (val: string) => {
+    playDtmfTone(val);
     if (!isInCall) {
       if (phoneNumber.length < 15) {
         setPhoneNumber((prev) => prev + val);
@@ -449,7 +482,7 @@ function DialerPage() {
           <div className="w-full flex justify-center">
             <CallButton onClick={handleCallToggle} isInCall={isInCall} />
           </div>
-        </div>
+      </div>
       </main>
 
       {(!isInCall || isMinimized) && (
