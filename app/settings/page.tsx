@@ -15,7 +15,10 @@ import {
   MapPin,
   Shield,
   Speaker,
-  Mic
+  Mic,
+  HelpCircle,
+  Copy,
+  ClipboardCheck,
 } from "lucide-react";
 import { useTheme } from "../ThemeContext";
 import { useLanguage } from "@/lib/LanguageContext";
@@ -56,6 +59,9 @@ const LANGUAGES = [
   "Mandarin Chinese",
 ] as const;
 
+// Your app's live webhook endpoint that handles incoming and outgoing call routing
+const TWILIO_WEBHOOK_URL = "https://jml-dialer-haga.vercel.app/api/voice";
+
 export default function SettingsPage() {
   const supabase = createClient();
   const router = useRouter();
@@ -92,6 +98,7 @@ export default function SettingsPage() {
   const [audioDialogOpen, setAudioDialogOpen] = useState(false);
   const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
   const [privacyDialogOpen, setPrivacyDialogOpen] = useState(false);
+  const [guideDialogOpen, setGuideDialogOpen] = useState(false);
 
   const [speakerVolume, setSpeakerVolume] = useState("80");
   const [micSensitivity, setMicSensitivity] = useState("Normal");
@@ -100,6 +107,8 @@ export default function SettingsPage() {
   const [micTesting, setMicTesting] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
   const [audioError, setAudioError] = useState("");
+
+  const [webhookUrlCopied, setWebhookUrlCopied] = useState(false);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
@@ -213,6 +222,16 @@ export default function SettingsPage() {
     await supabase.auth.signOut();
     router.push("/login");
     router.refresh();
+  };
+
+  const handleCopyWebhookUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(TWILIO_WEBHOOK_URL);
+      setWebhookUrlCopied(true);
+      setTimeout(() => setWebhookUrlCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy webhook URL:", err);
+    }
   };
 
   // --- Real audio testing ---
@@ -331,17 +350,27 @@ export default function SettingsPage() {
               <Key className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <span>{t("twilioConfiguration")}</span>
             </div>
-            {twilioAccountSid && twilioAuthToken && (
+            <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={handleCheckBalance}
-                disabled={checkingBalance}
-                className="flex items-center gap-1.5 text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                onClick={() => setGuideDialogOpen(true)}
+                className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
               >
-                <Wallet className="w-3.5 h-3.5" />
-                {checkingBalance ? "Checking..." : "Check Balance"}
+                <HelpCircle className="w-3.5 h-3.5" />
+                Setup Guide
               </button>
-            )}
+              {twilioAccountSid && twilioAuthToken && (
+                <button
+                  type="button"
+                  onClick={handleCheckBalance}
+                  disabled={checkingBalance}
+                  className="flex items-center gap-1.5 text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                >
+                  <Wallet className="w-3.5 h-3.5" />
+                  {checkingBalance ? "Checking..." : "Check Balance"}
+                </button>
+              )}
+            </div>
           </div>
 
           {balance !== null && (
@@ -405,6 +434,26 @@ export default function SettingsPage() {
                 placeholder="APxxxxxxxxxxxxxxxxxxxxxxxx"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-slate-200 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
               />
+              <button
+                type="button"
+                onClick={handleCopyWebhookUrl}
+                title="Copy webhook URL"
+                className="w-full mt-1.5 flex items-center justify-between gap-2 bg-slate-50 dark:bg-slate-800/60 border border-dashed border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <span className="flex flex-col min-w-0">
+                  <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500">
+                    Request URL — paste into Twilio TwiML App settings
+                  </span>
+                  <span className="text-[11px] font-mono text-slate-600 dark:text-slate-300 truncate">
+                    {TWILIO_WEBHOOK_URL}
+                  </span>
+                </span>
+                {webhookUrlCopied ? (
+                  <ClipboardCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
+                )}
+              </button>
             </div>
             <div>
               <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1 block">Twilio Phone Number</label>
@@ -756,6 +805,79 @@ export default function SettingsPage() {
             <DialogFooter className="mt-4">
               <Button
                 onClick={() => setPrivacyDialogOpen(false)}
+                className="w-full rounded-xl bg-slate-900 dark:bg-slate-800 text-white text-xs font-bold py-2"
+              >
+                Got It
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={guideDialogOpen} onOpenChange={setGuideDialogOpen}>
+          <DialogContent className="sm:max-w-sm rounded-3xl border-slate-200/80 dark:border-slate-800 dark:bg-slate-900 p-6 max-h-[85vh] overflow-y-auto">
+            <DialogHeader className="gap-1.5 mb-2">
+              <DialogTitle className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <HelpCircle className="w-4 h-4 text-blue-600 dark:text-blue-400" /> JML Connect & Twilio Setup Guide
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-500 dark:text-slate-400">
+                Follow these steps to connect your Twilio account and configure your webhooks.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed space-y-4 my-2">
+              <div>
+                <p className="font-bold text-slate-800 dark:text-slate-100 mb-1">Step 1: Get your Twilio Credentials</p>
+                <ol className="list-decimal list-outside pl-4 space-y-1">
+                  <li>Log into your Twilio Console.</li>
+                  <li>From the dashboard home page, copy your Account SID and Auth Token.</li>
+                  <li>Paste them into the corresponding fields in your JML Dialer settings.</li>
+                </ol>
+              </div>
+
+              <div>
+                <p className="font-bold text-slate-800 dark:text-slate-100 mb-1">Step 2: Create a TwiML App</p>
+                <ol className="list-decimal list-outside pl-4 space-y-1">
+                  <li>In your Twilio Console, navigate to Voice &gt; TwiML &gt; TwiML Apps.</li>
+                  <li>Click Create new TwiML App (or select an existing one).</li>
+                  <li>Give your application a friendly name (e.g., JML Dialer App).</li>
+                </ol>
+              </div>
+
+              <div>
+                <p className="font-bold text-slate-800 dark:text-slate-100 mb-1">Step 3: Configure the Request URL</p>
+                <p className="mb-1.5">Paste this exact URL into the Request URL field inside your Twilio TwiML App settings:</p>
+                <button
+                  type="button"
+                  onClick={handleCopyWebhookUrl}
+                  className="w-full flex items-center justify-between gap-2 bg-slate-50 dark:bg-slate-800/60 border border-dashed border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <span className="text-[11px] font-mono text-slate-700 dark:text-slate-300 truncate">
+                    {TWILIO_WEBHOOK_URL}
+                  </span>
+                  {webhookUrlCopied ? (
+                    <ClipboardCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
+                  )}
+                </button>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
+                  This is your app's live webhook endpoint that handles incoming and outgoing call routing.
+                </p>
+              </div>
+
+              <div>
+                <p className="font-bold text-slate-800 dark:text-slate-100 mb-1">Step 4: Save and Get your TwiML App SID</p>
+                <ol className="list-decimal list-outside pl-4 space-y-1">
+                  <li>Save your TwiML App configuration in Twilio.</li>
+                  <li>Copy the generated TwiML App SID (which always starts with AP).</li>
+                  <li>Paste that AP... value into the TwiML App SID field in JML Connect.</li>
+                </ol>
+              </div>
+            </div>
+
+            <DialogFooter className="mt-2">
+              <Button
+                onClick={() => setGuideDialogOpen(false)}
                 className="w-full rounded-xl bg-slate-900 dark:bg-slate-800 text-white text-xs font-bold py-2"
               >
                 Got It
