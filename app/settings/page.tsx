@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Key,
   Volume2,
@@ -14,11 +14,11 @@ import {
   Globe,
   MapPin,
   Shield,
-  User as UserIcon,
   Speaker,
   Mic
 } from "lucide-react";
 import { useTheme } from "../ThemeContext";
+import { useLanguage } from "@/lib/LanguageContext";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -54,14 +54,14 @@ const LANGUAGES = [
   "German",
   "Arabic",
   "Mandarin Chinese",
-];
+] as const;
 
 export default function SettingsPage() {
   const supabase = createClient();
   const router = useRouter();
   const { isDarkMode, toggleTheme } = useTheme();
+  const { language, setLanguage, t } = useLanguage();
 
-  // Existing states
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
 
@@ -83,24 +83,29 @@ export default function SettingsPage() {
   const [checkingBalance, setCheckingBalance] = useState(false);
   const [balanceError, setBalanceError] = useState("");
 
-  // Added new features & dialog states requested
   const [defaultCountry, setDefaultCountry] = useState("Nigeria (+234)");
-  const [language, setLanguage] = useState("English");
-  
-  // Notification sub-toggles
+
   const [missedCallNotifs, setMissedCallNotifs] = useState(true);
   const [incomingCallUI, setIncomingCallUI] = useState(true);
   const [messageNotifs, setMessageNotifs] = useState(true);
 
-  // Dialog modals
   const [audioDialogOpen, setAudioDialogOpen] = useState(false);
   const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
   const [privacyDialogOpen, setPrivacyDialogOpen] = useState(false);
 
-  // Audio test states
   const [speakerVolume, setSpeakerVolume] = useState("80");
   const [micSensitivity, setMicSensitivity] = useState("Normal");
   const [audioTested, setAudioTested] = useState(false);
+  const [playingTone, setPlayingTone] = useState(false);
+  const [micTesting, setMicTesting] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
+  const [audioError, setAudioError] = useState("");
+
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const oscillatorRef = useRef<OscillatorNode | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -125,12 +130,33 @@ export default function SettingsPage() {
         setTwilioApiKeySecret(settings.twilio_api_key_secret ?? "");
         setTwilioTwimlAppSid(settings.twilio_twiml_app_sid ?? "");
         setTwilioPhoneNumber(settings.twilio_phone_number ?? "");
+        setDefaultCountry(settings.country ?? "Nigeria (+234)");
+        setNotificationsEnabled(settings.notifications ?? true);
+        setMissedCallNotifs(settings.notify_missed_calls ?? true);
+        setMessageNotifs(settings.notify_messages ?? true);
       }
     }
     load();
+
+    return () => {
+      stopTone();
+      stopMicTest();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
 
   const userInitial = userName.charAt(0).toUpperCase();
+
+  const savePreference = async (fields: Record<string, any>) => {
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id;
+    if (!userId) return;
+
+    await supabase.from("settings").upsert(
+      { user_id: userId, ...fields },
+      { onConflict: "user_id" }
+    );
+  };
 
   const handleSaveTwilio = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -189,19 +215,91 @@ export default function SettingsPage() {
     router.refresh();
   };
 
-  const handleTestAudio = () => {
-    setAudioTested(true);
-    setTimeout(() => setAudioTested(false), 3000);
+  // --- Real audio testing ---
+  const playTone = () => {
+    setAudioError("");
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.value = 440;
+      gain.gain.value = Number(speakerVolume) / 100 * 0.3;
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start();
+      audioContextRef.current = ctx;
+      oscillatorRef.current = oscillator;
+      setPlayingTone(true);
+      setAudioTested(true);
+
+      setTimeout(() => {
+        stopTone();
+      }, 2000);
+    } catch (err: any) {
+      setAudioError("Couldn't play test tone: " + err.message);
+    }
+  };
+
+  const stopTone = () => {
+    oscillatorRef.current?.stop();
+    oscillatorRef.current?.disconnect();
+    audioContextRef.current?.close();
+    oscillatorRef.current = null;
+    audioContextRef.current = null;
+    setPlayingTone(false);
+  };
+
+  const startMicTest = async () => {
+    setAudioError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
+
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      audioContextRef.current = ctx;
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const gainMultiplier = micSensitivity === "High" ? 2 : micSensitivity === "Low" ? 0.5 : 1;
+
+      const update = () => {
+        analyser.getByteFrequencyData(dataArray);
+        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+        setMicLevel(Math.min(100, avg * gainMultiplier));
+        rafRef.current = requestAnimationFrame(update);
+      };
+      update();
+
+      setMicTesting(true);
+    } catch (err: any) {
+      setAudioError("Microphone access denied or unavailable: " + err.message);
+    }
+  };
+
+  const stopMicTest = () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    micStreamRef.current?.getTracks().forEach((track) => track.stop());
+    audioContextRef.current?.close();
+    micStreamRef.current = null;
+    analyserRef.current = null;
+    audioContextRef.current = null;
+    rafRef.current = null;
+    setMicTesting(false);
+    setMicLevel(0);
   };
 
   return (
     <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 p-4 pb-28 sm:px-6 transition-colors duration-200">
       <div className="w-full max-w-lg mx-auto flex flex-col gap-6">
         <div className="px-1">
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Settings</h1>
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white">{t("settings")}</h1>
         </div>
 
-        {/* Profile Card linking to separate profile screen */}
         <div
           onClick={() => router.push('/profile')}
           className="group bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex items-center justify-between"
@@ -227,12 +325,11 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Twilio Settings Section */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 shadow-sm flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200 font-bold text-xs uppercase tracking-wider">
               <Key className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              <span>Twilio Configuration</span>
+              <span>{t("twilioConfiguration")}</span>
             </div>
             {twilioAccountSid && twilioAuthToken && (
               <button
@@ -339,11 +436,9 @@ export default function SettingsPage() {
           </form>
         </div>
 
-        {/* Preferences List */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-2 shadow-sm flex flex-col divide-y divide-slate-100 dark:divide-slate-800/60">
-          
-          {/* Audio Settings */}
-          <div 
+
+          <div
             onClick={() => setAudioDialogOpen(true)}
             className="flex items-center justify-between p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-2xl transition-colors cursor-pointer"
           >
@@ -352,21 +447,20 @@ export default function SettingsPage() {
                 <Volume2 className="w-4 h-4" />
               </div>
               <div className="flex flex-col">
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Audio Settings</span>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{t("audioSettings")}</span>
                 <span className="text-[11px] text-slate-400 dark:text-slate-500">Ringtone, mic, speaker tests</span>
               </div>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-400 dark:text-slate-600" />
           </div>
 
-          {/* Dark Mode */}
           <div className="flex items-center justify-between p-3.5">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400">
                 <Moon className="w-4 h-4" />
               </div>
               <div className="flex flex-col">
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Dark Mode</span>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{t("darkMode")}</span>
                 <span className="text-[11px] text-slate-400 dark:text-slate-500">Toggle dark theme interface</span>
               </div>
             </div>
@@ -385,20 +479,22 @@ export default function SettingsPage() {
             </button>
           </div>
 
-          {/* Default Country Selector */}
           <div className="flex items-center justify-between p-3.5 gap-2">
             <div className="flex items-center gap-3 min-w-0">
               <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 shrink-0">
                 <MapPin className="w-4 h-4" />
               </div>
               <div className="flex flex-col min-w-0">
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">Default Country</span>
-                <span className="text-[11px] text-slate-400 dark:text-slate-500 truncate">Primary country code</span>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{t("defaultCountry")}</span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500 truncate">Used as default in dialer</span>
               </div>
             </div>
             <select
               value={defaultCountry}
-              onChange={(e) => setDefaultCountry(e.target.value)}
+              onChange={(e) => {
+                setDefaultCountry(e.target.value);
+                savePreference({ country: e.target.value });
+              }}
               className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium rounded-xl px-2.5 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none shrink-0 max-w-[145px]"
             >
               {COUNTRIES.map((c) => (
@@ -409,20 +505,19 @@ export default function SettingsPage() {
             </select>
           </div>
 
-          {/* Language Selector */}
           <div className="flex items-center justify-between p-3.5 gap-2">
             <div className="flex items-center gap-3 min-w-0">
               <div className="p-2 rounded-xl bg-cyan-50 dark:bg-cyan-950/50 text-cyan-600 dark:text-cyan-400 shrink-0">
                 <Globe className="w-4 h-4" />
               </div>
               <div className="flex flex-col min-w-0">
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">Language</span>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{t("language")}</span>
                 <span className="text-[11px] text-slate-400 dark:text-slate-500 truncate">Display language</span>
               </div>
             </div>
             <select
               value={language}
-              onChange={(e) => setLanguage(e.target.value)}
+              onChange={(e) => setLanguage(e.target.value as any)}
               className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium rounded-xl px-2.5 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none shrink-0 max-w-[130px]"
             >
               {LANGUAGES.map((lang) => (
@@ -431,7 +526,6 @@ export default function SettingsPage() {
             </select>
           </div>
 
-          {/* Notifications Section */}
           <div className="p-3.5 flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -439,13 +533,17 @@ export default function SettingsPage() {
                   <Bell className="w-4 h-4" />
                 </div>
                 <div className="flex flex-col">
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Notifications</span>
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{t("notifications")}</span>
                   <span className="text-[11px] text-slate-400 dark:text-slate-500">Incoming call alerts & badges</span>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => setNotificationsEnabled(!notificationsEnabled)}
+                onClick={() => {
+                  const next = !notificationsEnabled;
+                  setNotificationsEnabled(next);
+                  savePreference({ notifications: next });
+                }}
                 className={`w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${
                   notificationsEnabled ? "bg-blue-600" : "bg-slate-200 dark:bg-slate-700"
                 }`}
@@ -458,40 +556,46 @@ export default function SettingsPage() {
               </button>
             </div>
 
-            {/* Sub-notification toggles */}
             <div className="pl-9 flex flex-col gap-2.5 pt-1">
               <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
                 <span>Missed call notifications</span>
-                <input 
-                  type="checkbox" 
-                  checked={missedCallNotifs} 
-                  onChange={() => setMissedCallNotifs(!missedCallNotifs)}
+                <input
+                  type="checkbox"
+                  checked={missedCallNotifs}
+                  onChange={() => {
+                    const next = !missedCallNotifs;
+                    setMissedCallNotifs(next);
+                    savePreference({ notify_missed_calls: next });
+                  }}
                   className="accent-blue-600 rounded w-4 h-4 cursor-pointer"
                 />
               </div>
               <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
                 <span>Incoming call UI</span>
-                <input 
-                  type="checkbox" 
-                  checked={incomingCallUI} 
+                <input
+                  type="checkbox"
+                  checked={incomingCallUI}
                   onChange={() => setIncomingCallUI(!incomingCallUI)}
                   className="accent-blue-600 rounded w-4 h-4 cursor-pointer"
                 />
               </div>
               <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
                 <span>Message notifications</span>
-                <input 
-                  type="checkbox" 
-                  checked={messageNotifs} 
-                  onChange={() => setMessageNotifs(!messageNotifs)}
+                <input
+                  type="checkbox"
+                  checked={messageNotifs}
+                  onChange={() => {
+                    const next = !messageNotifs;
+                    setMessageNotifs(next);
+                    savePreference({ notify_messages: next });
+                  }}
                   className="accent-blue-600 rounded w-4 h-4 cursor-pointer"
                 />
               </div>
             </div>
           </div>
 
-          {/* Privacy Modal Trigger */}
-          <div 
+          <div
             onClick={() => setPrivacyDialogOpen(true)}
             className="flex items-center justify-between p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-2xl transition-colors cursor-pointer"
           >
@@ -500,15 +604,14 @@ export default function SettingsPage() {
                 <Shield className="w-4 h-4" />
               </div>
               <div className="flex flex-col">
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Privacy</span>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{t("privacy")}</span>
                 <span className="text-[11px] text-slate-400 dark:text-slate-500">Data protection and terms</span>
               </div>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-400 dark:text-slate-600" />
           </div>
 
-          {/* About Dialog Trigger */}
-          <div 
+          <div
             onClick={() => setAboutDialogOpen(true)}
             className="flex items-center justify-between p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-2xl transition-colors cursor-pointer"
           >
@@ -517,7 +620,7 @@ export default function SettingsPage() {
                 <Info className="w-4 h-4" />
               </div>
               <div className="flex flex-col">
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">About JML Dialer</span>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{t("about")}</span>
                 <span className="text-[11px] text-slate-400 dark:text-slate-500">Version 1.0.0 (MVP Build)</span>
               </div>
             </div>
@@ -530,11 +633,20 @@ export default function SettingsPage() {
           className="w-full bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 dark:hover:bg-rose-950/50 text-rose-600 dark:text-rose-400 text-xs font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 border border-rose-100 dark:border-rose-900/40 transition-all active:scale-[0.99]"
         >
           <LogOut className="w-4 h-4" />
-          <span>Log Out</span>
+          <span>{t("logOut")}</span>
         </button>
 
-        {/* Audio Test Modal */}
-        <Dialog open={audioDialogOpen} onOpenChange={setAudioDialogOpen}>
+        <Dialog
+          open={audioDialogOpen}
+          onOpenChange={(open) => {
+            setAudioDialogOpen(open);
+            if (!open) {
+              stopTone();
+              stopMicTest();
+              setAudioTested(false);
+            }
+          }}
+        >
           <DialogContent className="sm:max-w-xs rounded-3xl border-slate-200/80 dark:border-slate-800 dark:bg-slate-900 p-6">
             <DialogHeader className="gap-1.5 mb-2">
               <DialogTitle className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -550,21 +662,30 @@ export default function SettingsPage() {
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                   <Speaker className="w-3.5 h-3.5 text-slate-400" /> Speaker Volume ({speakerVolume}%)
                 </label>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="100" 
-                  value={speakerVolume} 
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={speakerVolume}
                   onChange={(e) => setSpeakerVolume(e.target.value)}
                   className="w-full accent-blue-600 cursor-pointer"
                 />
+                <Button
+                  onClick={playTone}
+                  disabled={playingTone}
+                  size="sm"
+                  variant="outline"
+                  className="w-full rounded-xl text-xs font-semibold mt-1"
+                >
+                  {playingTone ? "Playing tone..." : "Play Test Tone"}
+                </Button>
               </div>
 
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                   <Mic className="w-3.5 h-3.5 text-slate-400" /> Microphone Gain
                 </label>
-                <select 
+                <select
                   value={micSensitivity}
                   onChange={(e) => setMicSensitivity(e.target.value)}
                   className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs rounded-xl p-2.5 text-slate-800 dark:text-slate-200 focus:outline-none"
@@ -573,24 +694,42 @@ export default function SettingsPage() {
                   <option value="Normal">Normal</option>
                   <option value="High">High</option>
                 </select>
-              </div>
 
-              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-2xl p-3 flex flex-col items-center gap-2">
-                <span className="text-xs text-slate-600 dark:text-slate-300 font-medium text-center">
-                  {audioTested ? "✓ Audio test successful!" : "Click below to test audio hardware"}
-                </span>
-                <Button 
-                  onClick={handleTestAudio} 
+                {micTesting && (
+                  <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden mt-1">
+                    <div
+                      className="h-full bg-emerald-500 transition-all duration-75"
+                      style={{ width: `${micLevel}%` }}
+                    />
+                  </div>
+                )}
+
+                <Button
+                  onClick={micTesting ? stopMicTest : startMicTest}
                   size="sm"
-                  className="w-full rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold"
+                  variant="outline"
+                  className="w-full rounded-xl text-xs font-semibold mt-1"
                 >
-                  Run Test Tone
+                  {micTesting ? "Stop Mic Test" : "Test Microphone"}
                 </Button>
               </div>
+
+              {audioError && (
+                <div className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 rounded-xl px-3 py-2">
+                  {audioError}
+                </div>
+              )}
+
+              {audioTested && !audioError && (
+                <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl p-3 flex items-center justify-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">Speaker test successful!</span>
+                </div>
+              )}
             </div>
 
             <DialogFooter>
-              <Button 
+              <Button
                 onClick={() => setAudioDialogOpen(false)}
                 className="w-full rounded-xl bg-slate-900 dark:bg-slate-800 text-white text-xs font-bold py-2"
               >
@@ -600,7 +739,6 @@ export default function SettingsPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Privacy Modal */}
         <Dialog open={privacyDialogOpen} onOpenChange={setPrivacyDialogOpen}>
           <DialogContent className="sm:max-w-xs rounded-3xl border-slate-200/80 dark:border-slate-800 dark:bg-slate-900 p-6">
             <DialogHeader className="gap-1.5 mb-2">
@@ -616,7 +754,7 @@ export default function SettingsPage() {
               <p>Call logs and Twilio keys are handled securely and never shared with third parties.</p>
             </div>
             <DialogFooter className="mt-4">
-              <Button 
+              <Button
                 onClick={() => setPrivacyDialogOpen(false)}
                 className="w-full rounded-xl bg-slate-900 dark:bg-slate-800 text-white text-xs font-bold py-2"
               >
@@ -626,7 +764,6 @@ export default function SettingsPage() {
           </DialogContent>
         </Dialog>
 
-        {/* About Modal */}
         <Dialog open={aboutDialogOpen} onOpenChange={setAboutDialogOpen}>
           <DialogContent className="sm:max-w-xs rounded-3xl border-slate-200/80 dark:border-slate-800 dark:bg-slate-900 p-6 text-center">
             <div className="flex flex-col items-center gap-2 my-2">
@@ -646,7 +783,7 @@ export default function SettingsPage() {
               Designed for streamlined WebRTC calling and direct Twilio integration workflows.
             </p>
             <DialogFooter className="!mx-0 !w-full">
-              <Button 
+              <Button
                 onClick={() => setAboutDialogOpen(false)}
                 className="w-full rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2"
               >
@@ -656,7 +793,6 @@ export default function SettingsPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Logout Confirmation Dialog */}
         <Dialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
           <DialogContent
             className="sm:max-w-xs rounded-3xl border-slate-200/80 dark:border-slate-800 dark:bg-slate-900 p-0 gap-0 overflow-hidden"

@@ -26,6 +26,20 @@ import {
   PhoneOff 
 } from "lucide-react";
 
+const COUNTRY_NAME_TO_ISO: Record<string, string> = {
+  Nigeria: "NG",
+  "United States": "US",
+  "United Kingdom": "GB",
+  Canada: "CA",
+  Ghana: "GH",
+  Kenya: "KE",
+  "South Africa": "ZA",
+  Germany: "DE",
+  France: "FR",
+  Australia: "AU",
+  India: "IN",
+};
+
 function DialerPage() {
   const supabase = createClient();
   const searchParams = useSearchParams();
@@ -56,6 +70,9 @@ function DialerPage() {
   // Database-backed contact lookup state
   const [contactInfo, setContactInfo] = useState<{ name: string; title?: string; location?: string } | null>(null);
 
+  // New state for default country code derived from settings
+  const [defaultCountryCode, setDefaultCountryCode] = useState<string | undefined>(undefined);
+
   // Ensure component only renders after mounting on client to prevent hydration errors
   useEffect(() => {
     setHasMounted(true);
@@ -64,25 +81,33 @@ function DialerPage() {
     }
   }, [initialNumber]);
 
-  // Check if user has linked their Twilio account in settings
+  // Check if user has linked their Twilio account in settings and fetch default country
   useEffect(() => {
     if (!hasMounted) return;
-    async function checkTwilioLinked() {
+    async function checkTwilioAndCountry() {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
       if (!userId) return;
 
       const { data: settings } = await supabase
         .from("settings")
-        .select("twilio_account_sid, twilio_auth_token")
+        .select("twilio_account_sid, twilio_auth_token, country")
         .eq("user_id", userId)
         .maybeSingle();
 
       setTwilioLinked(
         !!(settings?.twilio_account_sid && settings?.twilio_auth_token)
       );
+
+      if (settings?.country) {
+        const countryName = settings.country.split(" ")[0]; // e.g. "Nigeria (+234)" -> "Nigeria"
+        const iso = COUNTRY_NAME_TO_ISO[countryName];
+        if (iso) {
+          setDefaultCountryCode(iso);
+        }
+      }
     }
-    checkTwilioLinked();
+    checkTwilioAndCountry();
   }, [hasMounted, supabase]);
 
   // Lookup contact from Supabase whenever phone number changes
@@ -501,7 +526,13 @@ function DialerPage() {
       <main className="w-full max-w-md flex-1 flex flex-col justify-between px-5 pt-1 pb-24 overflow-y-auto">
         <div className="flex flex-col gap-1.5">
           <StatusCard title="Line Status" status="Online" variant="success" statusState={callState} />
-          <PhoneInput value={phoneNumber} onChange={setPhoneNumber} />
+          
+          {/* Updated PhoneInput to receive defaultCountryCode */}
+          <PhoneInput 
+            value={phoneNumber} 
+            onChange={setPhoneNumber} 
+            defaultCountryCode={defaultCountryCode} 
+          />
 
           <div className="w-full bg-slate-100/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-3 flex items-center justify-between transition-colors duration-200">
             <div className="flex items-center gap-3">
@@ -541,7 +572,7 @@ function DialerPage() {
           <div className="w-full flex justify-center">
             <CallButton onClick={handleCallToggle} isInCall={isInCall} />
           </div>
-      </div>
+        </div>
       </main>
 
       {(!isInCall || isMinimized) && (

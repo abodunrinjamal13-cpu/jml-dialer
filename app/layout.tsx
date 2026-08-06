@@ -2,6 +2,7 @@
 
 import "./globals.css";
 import { ThemeProvider } from "./ThemeContext";
+import { LanguageProvider } from "@/lib/LanguageContext";
 import BottomNavigation from "@/components/common/BottomNavigation";
 import { usePathname } from "next/navigation";
 
@@ -18,8 +19,10 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased" suppressHydrationWarning>
         <ThemeProvider>
-          {children}
-          {!isLoginPage && !isChatDetailPage && <BottomNavigation />}
+          <LanguageProvider>
+            {children}
+            {!isLoginPage && !isChatDetailPage && <BottomNavigation />}
+          </LanguageProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -6,10 +6,11 @@ import { Clipboard, Delete, ChevronDown } from "lucide-react";
 interface PhoneInputProps {
   value: string;
   onChange: (val: string) => void;
+  defaultCountryCode?: string; // NEW — ISO code like "NG", from user's saved settings
 }
 
-// Complete list of world countries with dial codes & flag CDN links
 const ALL_COUNTRIES = [
+  // ...unchanged, keep your full existing list exactly as-is
   { code: "+1", countryCode: "US", name: "United States" },
   { code: "+1", countryCode: "CA", name: "Canada" },
   { code: "+7", countryCode: "RU", name: "Russia" },
@@ -120,7 +121,7 @@ const ALL_COUNTRIES = [
   flagUrl: `https://flagcdn.com/w20/${c.countryCode.toLowerCase()}.png`,
 }));
 
-export const PhoneInput: React.FC<PhoneInputProps> = ({ value, onChange }) => {
+export const PhoneInput: React.FC<PhoneInputProps> = ({ value, onChange, defaultCountryCode }) => {
   const [selectedCountry, setSelectedCountry] = useState(
     ALL_COUNTRIES.find((c) => c.countryCode === "NG") || ALL_COUNTRIES[0]
   );
@@ -128,19 +129,26 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({ value, onChange }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Long press refs
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const isLongPressRef = useRef<boolean>(false);
+  const appliedDefaultRef = useRef(false); // NEW
 
-  // Auto-detect matching country flag when digits are entered
+  // NEW — apply the user's saved default country once it arrives, only if they haven't typed yet
+  useEffect(() => {
+    if (defaultCountryCode && !appliedDefaultRef.current && !value) {
+      const match = ALL_COUNTRIES.find((c) => c.countryCode === defaultCountryCode);
+      if (match) {
+        setSelectedCountry(match);
+        appliedDefaultRef.current = true;
+      }
+    }
+  }, [defaultCountryCode, value]);
+
   useEffect(() => {
     if (!value) return;
 
     const digitsOnly = value.replace(/\D/g, "");
-
-    // Sort by code length descending so longer dial codes (+256) match before shorter ones (+2)
     const sorted = [...ALL_COUNTRIES].sort((a, b) => b.code.length - a.code.length);
-
     const match = sorted.find((c) => {
       const cleanCode = c.code.replace(/\D/g, "");
       return digitsOnly.startsWith(cleanCode);
@@ -166,7 +174,7 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({ value, onChange }) => {
     timerRef.current = setTimeout(() => {
       isLongPressRef.current = true;
       handleClearAll();
-    }, 400); // clears all if held for 400ms
+    }, 400);
   };
 
   const handlePressEnd = () => {
@@ -200,7 +208,6 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({ value, onChange }) => {
       suppressHydrationWarning
       className="w-full bg-white rounded-2xl border border-slate-200/80 shadow-xs px-3 py-3 flex flex-col justify-between shrink-0 min-h-[110px]"
     >
-      {/* Top Controls Header */}
       <div className="flex items-center justify-between" suppressHydrationWarning>
         <div className="relative">
           <button
@@ -219,7 +226,6 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({ value, onChange }) => {
             <ChevronDown className="w-3 h-3 text-slate-400 ml-0.5" />
           </button>
 
-          {/* Search Dropdown */}
           {isOpen && (
             <div className="absolute top-full left-0 mt-1 w-48 bg-white border border-slate-200 rounded-xl shadow-xl z-30 py-1 max-h-56 overflow-hidden flex flex-col">
               <input
@@ -253,7 +259,6 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({ value, onChange }) => {
           )}
         </div>
 
-        {/* Right Action Controls */}
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -280,7 +285,6 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({ value, onChange }) => {
         </div>
       </div>
 
-      {/* Input Display Area */}
       <div className="w-full text-center py-2">
         <input
           ref={inputRef}
