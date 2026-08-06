@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     }
 
     // Figure out which user owns this Twilio number
-    const settings = await prisma.settings.findFirst({
+    const settings = await (prisma.settings as any).findFirst({
       where: { twilio_phone_number: to },
     });
 
