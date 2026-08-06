@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -33,13 +33,13 @@ export async function middleware(request: NextRequest) {
 
   // If there is no user and they are trying to access protected pages, redirect to login
   if (!user && !isAuthPage) {
-    url.pathname = "/login"; // Change this to your login or signup route
+    url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
   // If they are logged in and trying to go to login/signup, redirect them to your main app page
   if (user && isAuthPage) {
-    url.pathname = "/"; // Change this to your main dashboard/dialer route
+    url.pathname = "/";
     return NextResponse.redirect(url);
   }
 
