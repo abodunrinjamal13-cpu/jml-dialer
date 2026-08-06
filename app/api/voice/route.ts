@@ -1,36 +1,52 @@
-import { NextResponse } from 'next/server';
-import twilio from 'twilio';
+import { NextResponse } from "next/server";
+import twilio from "twilio";
+import { createClient } from "@/lib/supabase/server";
+import { prisma } from "@/lib/prisma";
 
 export async function POST() {
   try {
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const apiKey = process.env.TWILIO_API_KEY;
-    const apiSecret = process.env.TWILIO_API_SECRET;
-    const twimlAppSid = process.env.TWILIO_TWIML_APP_SID;
+    const supabase = await createClient();
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id;
 
-    if (!accountSid || !apiKey || !apiSecret || !twimlAppSid) {
-      throw new Error('Missing required Twilio environment variables');
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const settings = await prisma.settings.findUnique({ where: { user_id: userId } });
+
+    if (
+      !settings?.twilio_account_sid ||
+      !settings?.twilio_api_key_sid ||
+      !settings?.twilio_api_key_secret ||
+      !settings?.twilio_twiml_app_sid
+    ) {
+      return NextResponse.json(
+        { error: "TWILIO_NOT_LINKED", message: "Please link your Twilio account in Settings before making calls." },
+        { status: 400 }
+      );
     }
 
     const AccessToken = twilio.jwt.AccessToken;
     const VoiceGrant = AccessToken.VoiceGrant;
 
-    const accessToken = new AccessToken(accountSid, apiKey, apiSecret, {
-      identity: 'jml_user_browser',
-    });
+    const accessToken = new AccessToken(
+      settings.twilio_account_sid,
+      settings.twilio_api_key_sid,
+      settings.twilio_api_key_secret,
+      { identity: userId }
+    );
 
     const voiceGrant = new VoiceGrant({
-      outgoingApplicationSid: twimlAppSid,
+      outgoingApplicationSid: settings.twilio_twiml_app_sid,
       incomingAllow: true,
     });
 
     accessToken.addGrant(voiceGrant);
 
-    return NextResponse.json({
-      token: accessToken.toJwt(),
-    });
+    return NextResponse.json({ token: accessToken.toJwt() });
   } catch (error: any) {
-    console.error('DETAILED TOKEN ERROR:', error.message);
+    console.error("Token error:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

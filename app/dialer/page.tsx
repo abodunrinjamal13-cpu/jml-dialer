@@ -49,6 +49,10 @@ function DialerPage() {
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [callNotes, setCallNotes] = useState("");
 
+  // Twilio Credential Guard States
+  const [twilioLinked, setTwilioLinked] = useState<boolean | null>(null);
+  const [showLinkPrompt, setShowLinkPrompt] = useState(false);
+
   // Database-backed contact lookup state
   const [contactInfo, setContactInfo] = useState<{ name: string; title?: string; location?: string } | null>(null);
 
@@ -59,6 +63,27 @@ function DialerPage() {
       setPhoneNumber(initialNumber);
     }
   }, [initialNumber]);
+
+  // Check if user has linked their Twilio account in settings
+  useEffect(() => {
+    if (!hasMounted) return;
+    async function checkTwilioLinked() {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+      if (!userId) return;
+
+      const { data: settings } = await supabase
+        .from("settings")
+        .select("twilio_account_sid, twilio_auth_token")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      setTwilioLinked(
+        !!(settings?.twilio_account_sid && settings?.twilio_auth_token)
+      );
+    }
+    checkTwilioLinked();
+  }, [hasMounted, supabase]);
 
   // Lookup contact from Supabase whenever phone number changes
   useEffect(() => {
@@ -73,7 +98,6 @@ function DialerPage() {
         const userId = userData.user?.id;
         if (!userId) return;
 
-        // Clean number variations for flexible matching (exact, stripped spaces, or suffix matching)
         const cleanedNumber = phoneNumber.replace(/\D/g, "");
         const queryVariants = [
           phoneNumber,
@@ -83,7 +107,6 @@ function DialerPage() {
           !cleanedNumber.startsWith("234") && cleanedNumber.startsWith("0") ? `234${cleanedNumber.slice(1)}` : null,
         ].filter(Boolean);
 
-        // Build an OR query string for Supabase e.g. phone.eq.08148...,phone.eq.8148...
         const orFilter = queryVariants.map((v) => `phone.eq.${v}`).join(",");
 
         const { data, error } = await supabase
@@ -140,7 +163,6 @@ function DialerPage() {
     return null;
   }
 
-  // Helper to play standard telephone DTMF keypad frequencies using Web Audio API
   const playDtmfTone = (digit: string) => {
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -168,7 +190,7 @@ function DialerPage() {
       osc.start();
       osc.stop(audioCtx.currentTime + 0.15);
     } catch (e) {
-      // AudioContext blocked if no user interaction yet
+      // AudioContext blocked
     }
   };
 
@@ -212,6 +234,12 @@ function DialerPage() {
   };
 
   const handleCallToggle = async () => {
+    // Guard Check: Block calls if Twilio is not linked
+    if (!twilioLinked) {
+      setShowLinkPrompt(true);
+      return;
+    }
+
     if (!isInCall) {
       if (!device || !phoneNumber) return;
       try {
@@ -289,6 +317,37 @@ function DialerPage() {
   return (
     <div className="suppressHydrationWarning relative h-screen w-screen bg-slate-50 dark:bg-[#030712] text-slate-900 dark:text-white flex flex-col justify-between items-center select-none transition-colors duration-200 overflow-hidden">
       
+      {showLinkPrompt && (
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4">
+            <div className="w-16 h-16 bg-amber-500/20 text-amber-400 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">
+              ⚠️
+            </div>
+            <h3 className="text-lg font-semibold text-white">Twilio Account Not Linked</h3>
+            <p className="text-sm text-slate-300">
+              You must configure your own Twilio Account SID and Auth Token in settings before you can make calls.
+            </p>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setShowLinkPrompt(false)}
+                className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl text-sm font-medium transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowLinkPrompt(false);
+                  window.location.href = "/settings";
+                }}
+                className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl text-sm font-medium transition"
+              >
+                Go to Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isInCall && !isMinimized && (
         <div className="absolute inset-0 w-full h-full bg-[#0F1C3F] text-white p-6 flex flex-col justify-between z-[9999]">
           <div className="flex justify-between items-center pt-2">
