@@ -15,11 +15,13 @@ export async function POST() {
 
     const settings = await prisma.settings.findUnique({ where: { user_id: userId } });
 
+    const twilioSettings = settings as any;
+
     if (
-      !settings?.twilio_account_sid ||
-      !settings?.twilio_api_key_sid ||
-      !settings?.twilio_api_key_secret ||
-      !settings?.twilio_twiml_app_sid
+      !twilioSettings?.twilio_account_sid ||
+      !twilioSettings?.twilio_api_key_sid ||
+      !twilioSettings?.twilio_api_key_secret ||
+      !twilioSettings?.twilio_twiml_app_sid
     ) {
       return NextResponse.json(
         { error: "TWILIO_NOT_LINKED", message: "Please link your Twilio account in Settings before making calls." },
@@ -31,14 +33,14 @@ export async function POST() {
     const VoiceGrant = AccessToken.VoiceGrant;
 
     const accessToken = new AccessToken(
-      settings.twilio_account_sid,
-      settings.twilio_api_key_sid,
-      settings.twilio_api_key_secret,
+      twilioSettings.twilio_account_sid,
+      twilioSettings.twilio_api_key_sid,
+      twilioSettings.twilio_api_key_secret,
       { identity: userId }
     );
 
     const voiceGrant = new VoiceGrant({
-      outgoingApplicationSid: settings.twilio_twiml_app_sid,
+      outgoingApplicationSid: twilioSettings.twilio_twiml_app_sid,
       incomingAllow: true,
     });
 
