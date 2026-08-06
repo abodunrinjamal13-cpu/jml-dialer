@@ -1,171 +1,242 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Search } from "lucide-react";
-import { useRouter } from "next/navigation";
+import React, { useState, useEffect, useRef } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { ArrowLeft, Send, Phone } from "lucide-react";
 
-interface Conversation {
-  key: string;
-  contactId: string | null;
-  phoneNumber: string | null;
-  name: string;
-  avatarText: string;
-  lastMessage: string;
-  timestamp: string;
-  unreadCount: number;
+interface Message {
+  id: string;
+  user_id: string;
+  contact_id: string;
+  message: string;
+  direction: string; // "outgoing" or "incoming"
+  created_at: string;
 }
 
-function formatTimestamp(dateString: string) {
-  const date = new Date(dateString);
-  const now = new Date();
-  const isToday = date.toDateString() === now.toDateString();
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  const isYesterday = date.toDateString() === yesterday.toDateString();
-
-  if (isToday) {
-    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  }
-  if (isYesterday) return "Yesterday";
-  return date.toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
-export default function MessagesPage() {
+export default function ChatDetailPage() {
   const supabase = createClient();
   const router = useRouter();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const params = useParams();
+  const contactId = params?.id as string;
+
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [contactName, setContactName] = useState("Loading...");
+  const [contactPhone, setContactPhone] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    async function loadConversations() {
+    async function initChat() {
       const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) {
-        setLoading(false);
-        return;
+      if (userData.user) {
+        setCurrentUserId(userData.user.id);
       }
 
-      const { data: contacts } = await supabase
-        .from("contacts")
-        .select("id, name")
-        .eq("user_id", userId);
+      if (contactId) {
+        const { data: contactData } = await supabase
+          .from("contacts")
+          .select("name, phone")
+          .eq("id", contactId)
+          .maybeSingle();
 
-      const { data: messages } = await supabase
-        .from("messages")
-        .select("id, contact_id, phone_number, message, direction, status, created_at")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
-
-      if (!messages) {
-        setLoading(false);
-        return;
-      }
-
-      const contactMap = new Map((contacts ?? []).map((c) => [c.id, c.name]));
-      const grouped = new Map<string, Conversation>();
-
-      for (const msg of messages) {
-        const key = msg.contact_id ?? msg.phone_number ?? msg.id;
-        if (grouped.has(key)) continue;
-
-        const name = msg.contact_id
-          ? contactMap.get(msg.contact_id) ?? "Unknown"
-          : msg.phone_number ?? "Unknown number";
-
-        grouped.set(key, {
-          key,
-          contactId: msg.contact_id,
-          phoneNumber: msg.phone_number,
-          name,
-          avatarText: name.charAt(0).toUpperCase(),
-          lastMessage: msg.message,
-          timestamp: formatTimestamp(msg.created_at),
-          unreadCount: 0,
-        });
-      }
-
-      for (const msg of messages) {
-        const key = msg.contact_id ?? msg.phone_number ?? msg.id;
-        if (msg.direction === "inbound" && msg.status !== "read" && grouped.has(key)) {
-          grouped.get(key)!.unreadCount += 1;
+        if (contactData) {
+          setContactName(contactData.name);
+          setContactPhone(contactData.phone ?? null);
+        } else {
+          setContactName("Chat Conversation");
         }
       }
+    }
+    initChat();
+  }, [contactId, supabase]);
 
-      setConversations(Array.from(grouped.values()));
-      setLoading(false);
+  useEffect(() => {
+    if (!contactId || !currentUserId) return;
+
+    async function fetchMessages() {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("user_id", currentUserId)
+        .eq("contact_id", contactId)
+        .order("created_at", { ascending: true });
+
+      if (data) {
+        setMessages(data);
+      } else if (error) {
+        console.error("Error fetching messages:", error.message);
+      }
     }
 
-    loadConversations();
-  }, [supabase]);
+    fetchMessages();
 
-  const filteredConversations = conversations.filter(
-    (conv) =>
-      conv.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      conv.lastMessage.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+    const channel = supabase
+      .channel(`chat_${contactId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `contact_id=eq.${contactId}`,
+        },
+        (payload) => {
+          setMessages((prev) => {
+            const incoming = payload.new as Message;
+            if (prev.some((m) => m.id === incoming.id)) return prev;
+            return [...prev, incoming];
+          });
+        }
+      )
+      .subscribe();
 
-  const openConversation = (conv: Conversation) => {
-    const target = conv.contactId ?? `number-${encodeURIComponent(conv.phoneNumber ?? "")}`;
-    router.push(`/messages/${target}`);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [contactId, currentUserId, supabase]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !currentUserId || !contactId) return;
+
+    setIsSending(true);
+    const text = newMessage;
+    setNewMessage("");
+
+    let resolvedPhoneNumber = contactPhone;
+    if (contactId && !resolvedPhoneNumber) {
+      const { data: contact } = await supabase
+        .from("contacts")
+        .select("phone")
+        .eq("id", contactId)
+        .single();
+      resolvedPhoneNumber = contact?.phone ?? null;
+      setContactPhone(resolvedPhoneNumber);
+    }
+
+    if (!resolvedPhoneNumber) {
+      alert("This contact has no phone number saved.");
+      setNewMessage(text);
+      setIsSending(false);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/messages/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: resolvedPhoneNumber, body: text, contactId }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message ?? data.error ?? "Failed to send message");
+      }
+
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === data.id)) return prev;
+        return [...prev, data];
+      });
+    } catch (err: any) {
+      console.error("Error sending message:", err.message);
+      alert("Failed to send: " + err.message);
+      setNewMessage(text);
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 p-4 pb-28 sm:px-6 transition-colors duration-200">
-      <div className="w-full max-w-lg mx-auto flex flex-col gap-5">
-        <div className="flex items-center justify-between px-1">
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Messages</h1>
+    <div className="relative h-screen w-screen bg-slate-50 dark:bg-[#030712] text-slate-900 dark:text-white flex flex-col justify-between overflow-hidden select-none">
+
+      <div className="flex items-center justify-between px-4 py-3 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 z-20">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.back()}
+            className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+          >
+            <ArrowLeft className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+          </button>
+          <div className="w-9 h-9 rounded-full bg-indigo-600 text-white font-semibold flex items-center justify-center text-sm shadow-sm">
+            {contactName[0]?.toUpperCase() || "?"}
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold leading-tight">{contactName}</h2>
+            <p className="text-[10px] text-emerald-500 font-medium">Online</p>
+          </div>
         </div>
 
-        <div className="relative w-full">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        <button
+          onClick={() => contactPhone && router.push(`/dialer?number=${encodeURIComponent(contactPhone)}`)}
+          className="p-2 rounded-full bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 transition"
+        >
+          <Phone className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3 pb-20">
+        {messages.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400 dark:text-slate-500 mt-20">
+            <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-2 text-xl">
+              💬
+            </div>
+            <p className="text-xs">No messages yet. Start the conversation!</p>
+          </div>
+        ) : (
+          messages.map((msg) => {
+            const isMe = msg.direction === "outgoing" || msg.user_id === currentUserId;
+            return (
+              <div
+                key={msg.id}
+                className={`flex flex-col max-w-[75%] ${isMe ? "self-end items-end" : "self-start items-start"}`}
+              >
+                <div
+                  className={`px-4 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${
+                    isMe
+                      ? "bg-indigo-600 text-white rounded-br-none"
+                      : "bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-white rounded-bl-none"
+                  }`}
+                >
+                  {msg.message}
+                </div>
+                <span className="text-[9px] text-slate-400 mt-1 px-1">
+                  {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+            );
+          })
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      <div className="absolute bottom-0 left-0 right-0 p-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 z-20">
+        <form onSubmit={handleSendMessage} className="flex items-center gap-2 max-w-md mx-auto">
           <input
             type="text"
-            placeholder="Search conversations..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-sm"
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            placeholder="Type a message..."
+            className="flex-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full px-4 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 transition"
           />
-        </div>
-
-        <div className="flex flex-col gap-2">
-          {loading ? (
-            <div className="text-center py-12 text-slate-400 text-xs">Loading messages...</div>
-          ) : filteredConversations.length === 0 ? (
-            <div className="text-center py-12 text-slate-400 text-xs">No messages found</div>
-          ) : (
-            filteredConversations.map((conv) => (
-              <div
-                key={conv.key}
-                onClick={() => openConversation(conv)}
-                className="flex items-center justify-between bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-3 shadow-sm hover:border-slate-300 dark:hover:border-slate-700 transition-all cursor-pointer"
-              >
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <div className="w-11 h-11 rounded-full bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold text-sm shrink-0">
-                    {conv.avatarText}
-                  </div>
-                  <div className="flex flex-col min-w-0 pr-2">
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{conv.name}</span>
-                    <span className="text-[11px] text-slate-500 dark:text-slate-400 font-normal truncate mt-0.5">
-                      {conv.lastMessage}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-end gap-1.5 shrink-0">
-                  <span className="text-[10px] text-slate-400 font-medium">{conv.timestamp}</span>
-                  {conv.unreadCount > 0 ? (
-                    <span className="bg-blue-600 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-sm">
-                      {conv.unreadCount}
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+          <button
+            type="submit"
+            disabled={!newMessage.trim() || isSending}
+            className="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white flex items-center justify-center transition shadow-md shrink-0"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </form>
       </div>
+
     </div>
   );
 }

@@ -59,8 +59,10 @@ const LANGUAGES = [
   "Mandarin Chinese",
 ] as const;
 
-// Your app's live webhook endpoint that handles incoming and outgoing call routing
-const TWILIO_WEBHOOK_URL = "https://jml-dialer-haga.vercel.app/api/voice";
+// Voice webhook — Twilio calls this to get call instructions (TwiML)
+const TWILIO_VOICE_WEBHOOK_URL = "https://jml-dialer-haga.vercel.app/api/voice/twiml";
+// Messaging webhook — Twilio calls this when someone texts your number
+const TWILIO_MESSAGING_WEBHOOK_URL = "https://jml-dialer-haga.vercel.app/api/messages";
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -108,7 +110,8 @@ export default function SettingsPage() {
   const [micLevel, setMicLevel] = useState(0);
   const [audioError, setAudioError] = useState("");
 
-  const [webhookUrlCopied, setWebhookUrlCopied] = useState(false);
+  const [voiceUrlCopied, setVoiceUrlCopied] = useState(false);
+  const [messagingUrlCopied, setMessagingUrlCopied] = useState(false);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
@@ -206,16 +209,21 @@ export default function SettingsPage() {
     setBalanceError("");
     setBalance(null);
 
-    const res = await fetch("/api/twilio/balance");
-    const data = await res.json();
+    try {
+      const res = await fetch("/api/twilio/balance");
+      const data = await res.json();
 
-    if (!res.ok) {
-      setBalanceError(data.error ?? "Failed to fetch balance");
-    } else {
-      setBalance(data.balance);
-      setBalanceCurrency(data.currency);
+      if (!res.ok) {
+        setBalanceError(data.error ?? "Failed to fetch balance");
+      } else {
+        setBalance(data.balance);
+        setBalanceCurrency(data.currency);
+      }
+    } catch (err: any) {
+      setBalanceError("Couldn't reach the server: " + err.message);
+    } finally {
+      setCheckingBalance(false);
     }
-    setCheckingBalance(false);
   };
 
   const confirmLogout = async () => {
@@ -224,13 +232,23 @@ export default function SettingsPage() {
     router.refresh();
   };
 
-  const handleCopyWebhookUrl = async () => {
+  const handleCopyVoiceUrl = async () => {
     try {
-      await navigator.clipboard.writeText(TWILIO_WEBHOOK_URL);
-      setWebhookUrlCopied(true);
-      setTimeout(() => setWebhookUrlCopied(false), 2000);
+      await navigator.clipboard.writeText(TWILIO_VOICE_WEBHOOK_URL);
+      setVoiceUrlCopied(true);
+      setTimeout(() => setVoiceUrlCopied(false), 2000);
     } catch (err) {
-      console.error("Failed to copy webhook URL:", err);
+      console.error("Failed to copy voice webhook URL:", err);
+    }
+  };
+
+  const handleCopyMessagingUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(TWILIO_MESSAGING_WEBHOOK_URL);
+      setMessagingUrlCopied(true);
+      setTimeout(() => setMessagingUrlCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy messaging webhook URL:", err);
     }
   };
 
@@ -436,19 +454,19 @@ export default function SettingsPage() {
               />
               <button
                 type="button"
-                onClick={handleCopyWebhookUrl}
-                title="Copy webhook URL"
+                onClick={handleCopyVoiceUrl}
+                title="Copy voice webhook URL"
                 className="w-full mt-1.5 flex items-center justify-between gap-2 bg-slate-50 dark:bg-slate-800/60 border border-dashed border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
                 <span className="flex flex-col min-w-0">
                   <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500">
-                    Request URL — paste into Twilio TwiML App settings
+                    Voice Request URL — paste into Twilio TwiML App settings
                   </span>
                   <span className="text-[11px] font-mono text-slate-600 dark:text-slate-300 truncate">
-                    {TWILIO_WEBHOOK_URL}
+                    {TWILIO_VOICE_WEBHOOK_URL}
                   </span>
                 </span>
-                {webhookUrlCopied ? (
+                {voiceUrlCopied ? (
                   <ClipboardCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 ) : (
                   <Copy className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
@@ -464,6 +482,26 @@ export default function SettingsPage() {
                 placeholder="+16403564669"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-slate-200 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
               />
+              <button
+                type="button"
+                onClick={handleCopyMessagingUrl}
+                title="Copy messaging webhook URL"
+                className="w-full mt-1.5 flex items-center justify-between gap-2 bg-slate-50 dark:bg-slate-800/60 border border-dashed border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <span className="flex flex-col min-w-0">
+                  <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500">
+                    Messaging Request URL — paste into this number's Messaging config
+                  </span>
+                  <span className="text-[11px] font-mono text-slate-600 dark:text-slate-300 truncate">
+                    {TWILIO_MESSAGING_WEBHOOK_URL}
+                  </span>
+                </span>
+                {messagingUrlCopied ? (
+                  <ClipboardCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
+                )}
+              </button>
             </div>
 
             <div className="flex justify-between items-center mt-1">
@@ -844,24 +882,24 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <p className="font-bold text-slate-800 dark:text-slate-100 mb-1">Step 3: Configure the Request URL</p>
-                <p className="mb-1.5">Paste this exact URL into the Request URL field inside your Twilio TwiML App settings:</p>
+                <p className="font-bold text-slate-800 dark:text-slate-100 mb-1">Step 3: Configure the Voice Request URL</p>
+                <p className="mb-1.5">Paste this exact URL into the Request URL field under Voice Configuration in your Twilio TwiML App settings:</p>
                 <button
                   type="button"
-                  onClick={handleCopyWebhookUrl}
+                  onClick={handleCopyVoiceUrl}
                   className="w-full flex items-center justify-between gap-2 bg-slate-50 dark:bg-slate-800/60 border border-dashed border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                 >
                   <span className="text-[11px] font-mono text-slate-700 dark:text-slate-300 truncate">
-                    {TWILIO_WEBHOOK_URL}
+                    {TWILIO_VOICE_WEBHOOK_URL}
                   </span>
-                  {webhookUrlCopied ? (
+                  {voiceUrlCopied ? (
                     <ClipboardCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                   ) : (
                     <Copy className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
                   )}
                 </button>
                 <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
-                  This is your app's live webhook endpoint that handles incoming and outgoing call routing.
+                  This is your app's live webhook endpoint that handles outgoing call routing. Make sure it ends in <span className="font-mono">/twiml</span> — a common mistake is pasting the token endpoint instead.
                 </p>
               </div>
 
@@ -872,6 +910,28 @@ export default function SettingsPage() {
                   <li>Copy the generated TwiML App SID (which always starts with AP).</li>
                   <li>Paste that AP... value into the TwiML App SID field in JML Connect.</li>
                 </ol>
+              </div>
+
+              <div>
+                <p className="font-bold text-slate-800 dark:text-slate-100 mb-1">Step 5: Enable SMS (optional)</p>
+                <p className="mb-1.5">To send and receive text messages, paste this URL into your Twilio phone number's "A message comes in" webhook field:</p>
+                <button
+                  type="button"
+                  onClick={handleCopyMessagingUrl}
+                  className="w-full flex items-center justify-between gap-2 bg-slate-50 dark:bg-slate-800/60 border border-dashed border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <span className="text-[11px] font-mono text-slate-700 dark:text-slate-300 truncate">
+                    {TWILIO_MESSAGING_WEBHOOK_URL}
+                  </span>
+                  {messagingUrlCopied ? (
+                    <ClipboardCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
+                  )}
+                </button>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
+                  Found under Phone Numbers → your number → Messaging Configuration in Twilio.
+                </p>
               </div>
             </div>
 
