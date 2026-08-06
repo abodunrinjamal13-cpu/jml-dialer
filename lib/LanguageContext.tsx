@@ -17,6 +17,10 @@ const translations: Record<Language, Record<string, string>> = {
     privacy: "Privacy",
     about: "About JML Dialer",
     logOut: "Log Out",
+    dialer: "Dialer",
+    contacts: "Contacts",
+    messages: "Messages",
+    calls: "Calls",
   },
   French: {
     settings: "Paramètres",
@@ -29,6 +33,10 @@ const translations: Record<Language, Record<string, string>> = {
     privacy: "Confidentialité",
     about: "À propos de JML Dialer",
     logOut: "Se déconnecter",
+    dialer: "Composeur",
+    contacts: "Contacts",
+    messages: "Messages",
+    calls: "Appels",
   },
   Spanish: {
     settings: "Configuración",
@@ -41,6 +49,10 @@ const translations: Record<Language, Record<string, string>> = {
     privacy: "Privacidad",
     about: "Acerca de JML Dialer",
     logOut: "Cerrar sesión",
+    dialer: "Marcador",
+    contacts: "Contactos",
+    messages: "Mensajes",
+    calls: "Llamadas",
   },
   Portuguese: {
     settings: "Configurações",
@@ -53,6 +65,10 @@ const translations: Record<Language, Record<string, string>> = {
     privacy: "Privacidade",
     about: "Sobre o JML Dialer",
     logOut: "Sair",
+    dialer: "Discador",
+    contacts: "Contatos",
+    messages: "Mensagens",
+    calls: "Chamadas",
   },
   German: {
     settings: "Einstellungen",
@@ -65,6 +81,10 @@ const translations: Record<Language, Record<string, string>> = {
     privacy: "Datenschutz",
     about: "Über JML Dialer",
     logOut: "Abmelden",
+    dialer: "Wählhilfe",
+    contacts: "Kontakte",
+    messages: "Nachrichten",
+    calls: "Anrufe",
   },
   Arabic: {
     settings: "الإعدادات",
@@ -77,6 +97,10 @@ const translations: Record<Language, Record<string, string>> = {
     privacy: "الخصوصية",
     about: "حول JML Dialer",
     logOut: "تسجيل الخروج",
+    dialer: "لوحة الاتصال",
+    contacts: "جهات الاتصال",
+    messages: "الرسائل",
+    calls: "المكالمات",
   },
   "Mandarin Chinese": {
     settings: "设置",
@@ -89,6 +113,10 @@ const translations: Record<Language, Record<string, string>> = {
     privacy: "隐私",
     about: "关于 JML Dialer",
     logOut: "退出登录",
+    dialer: "拨号盘",
+    contacts: "联系人",
+    messages: "消息",
+    calls: "通话",
   },
 };
 

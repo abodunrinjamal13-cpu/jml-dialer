@@ -4,16 +4,18 @@ import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Phone, History, MessageSquare, Users, Settings } from "lucide-react";
+import { useLanguage } from "@/lib/LanguageContext";
 
 export function BottomNavigation() {
   const pathname = usePathname();
+  const { t } = useLanguage();
 
   const navItems = [
-    { label: "Dialer", href: "/dialer", icon: Phone },
-    { label: "History", href: "/history", icon: History },
-    { label: "Messages", href: "/messages", icon: MessageSquare },
-    { label: "Contacts", href: "/contacts", icon: Users },
-    { label: "Settings", href: "/settings", icon: Settings },
+    { label: t("dialer"), href: "/dialer", icon: Phone },
+    { label: t("history") || "History", href: "/history", icon: History },
+    { label: t("messages"), href: "/messages", icon: MessageSquare },
+    { label: t("contacts") || "Contacts", href: "/contacts", icon: Users },
+    { label: t("settings"), href: "/settings", icon: Settings },
   ];
 
   return (
