@@ -1,23 +1,28 @@
 import { NextResponse } from "next/server";
 import twilio from "twilio";
+import { createClient } from "@/lib/supabase/server";
+import { prisma } from "@/lib/prisma";
 
-export async function POST(request: Request) {
-  const formData = await request.formData();
-  const to = formData.get("To") as string | null;
-  const callerId = formData.get("CallerId") as string | null;
+export async function GET() {
+  const supabase = await createClient();
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
 
-  const twiml = new twilio.twiml.VoiceResponse();
-
-  if (to) {
-    const dial = twiml.dial({
-      callerId: callerId ?? undefined,
-    });
-    dial.number(to);
-  } else {
-    twiml.say("We couldn't complete this call. Goodbye.");
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  return new NextResponse(twiml.toString(), {
-    headers: { "Content-Type": "text/xml" },
-  });
+  const settings = await prisma.settings.findUnique({ where: { user_id: userId } });
+
+  if (!settings?.twilio_account_sid || !settings?.twilio_auth_token) {
+    return NextResponse.json({ error: "Twilio not linked" }, { status: 400 });
+  }
+
+  try {
+    const client = twilio(settings.twilio_account_sid, settings.twilio_auth_token);
+    const balance = await client.balance.fetch();
+    return NextResponse.json({ balance: balance.balance, currency: balance.currency });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 }
